@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2019 the original author or authors.
+ * Copyright 2016-2020 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,13 @@
 
 package org.springframework.integration.jdbc.lock;
 
+import org.springframework.dao.CannotAcquireLockException;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.dao.TransientDataAccessException;
+import org.springframework.integration.support.locks.ExpirableLockRegistry;
+import org.springframework.integration.util.UUIDConverter;
+import org.springframework.util.Assert;
+
 import java.time.Duration;
 import java.util.Iterator;
 import java.util.Map;
@@ -26,15 +33,7 @@ import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
-import org.springframework.dao.CannotAcquireLockException;
-import org.springframework.dao.DataAccessResourceFailureException;
-import org.springframework.dao.TransientDataAccessException;
-import org.springframework.integration.support.locks.ExpirableLockRegistry;
-import org.springframework.integration.util.UUIDConverter;
-import org.springframework.util.Assert;
-
 /**
- *
  * An {@link ExpirableLockRegistry} using a shared database to co-ordinate the locks.
  * Provides the same semantics as the
  * {@link org.springframework.integration.support.locks.DefaultLockRegistry}, but the
@@ -47,7 +46,6 @@ import org.springframework.util.Assert;
  * @author Kai Zimmermann
  * @author Bartosz Rempuszewski
  * @author Gary Russell
- *
  * @since 4.3
  */
 public class JdbcLockRegistry implements ExpirableLockRegistry {
@@ -97,6 +95,20 @@ public class JdbcLockRegistry implements ExpirableLockRegistry {
 				iterator.remove();
 			}
 		}
+	}
+
+	public void renewLock(Lock lock) {
+		Assert.isInstanceOf(JdbcLock.class, lock);
+		JdbcLock jdbcLock = (JdbcLock) lock;
+
+		if (!jdbcLock.isAcquiredInThisProcess()) {
+			throw new IllegalMonitorStateException("You do not own mutex at " + jdbcLock.path);
+		}
+
+		if (!jdbcLock.mutex.acquire(jdbcLock.path)) {
+			throw new IllegalStateException("Could not renew mutex at " + jdbcLock.path);
+		}
+
 	}
 
 	private static final class JdbcLock implements Lock {
